@@ -297,7 +297,7 @@ pub struct LoginFields {
 impl LoginFields {
     /// Internal helper for validation and fixups of an "origin" stored as
     /// a string.
-    fn validate_and_fixup_origin(origin: &str) -> Result<Option<String>> {
+    pub fn validate_and_fixup_origin(origin: &str) -> Result<Option<String>> {
         // Check we can parse the origin, then use the normalized version of it.
         match Url::parse(origin) {
             Ok(mut u) => {
@@ -613,8 +613,12 @@ impl ValidateAndFixup for LoginFields {
 
         // Check we can parse the origin, then use the normalized version of it.
         if let Some(fixed) = Self::validate_and_fixup_origin(&self.origin)? {
+            log::warn!("Origin not norm {:?}", &self.origin);
+            log::warn!("fixed= not norm {:?}", fixed);
+
             get_fixed_or_throw!(InvalidLogin::IllegalFieldValue {
                 field_info: "Origin is not normalized".into()
+
             })?
             .origin = fixed;
         }
@@ -726,6 +730,24 @@ pub mod test_utils {
             fields: LoginFields {
                 form_action_origin: Some(format!("https://{}.example.com", id)),
                 origin: format!("https://{}.example.com", id),
+                ..Default::default()
+            },
+            sec_fields: encrypt_struct(&sec_fields),
+        }
+    }
+    pub fn enc_login2(id: &str, password: &str,origin_str: &str) -> EncryptedLogin {
+        let sec_fields = SecureLoginFields {
+            username: "user".to_string(),
+            password: password.to_string(),
+        };
+        EncryptedLogin {
+            record: RecordFields {
+                id: id.to_string(),
+                ..Default::default()
+            },
+            fields: LoginFields {
+                form_action_origin: Some(format!("https://{}.example.com", id)),
+                origin: origin_str.to_string(),
                 ..Default::default()
             },
             sec_fields: encrypt_struct(&sec_fields),

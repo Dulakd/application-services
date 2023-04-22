@@ -13,7 +13,8 @@ use rusqlite::{named_params, Connection};
 use std::time::SystemTime;
 use sync15::ServerTimestamp;
 use sync_guid::Guid;
-
+//use crate::login::get_fixed_or_throw;
+use crate::login::LoginFields;
 #[derive(Default, Debug)]
 pub(super) struct UpdatePlan {
     pub delete_mirror: Vec<Guid>,
@@ -136,6 +137,7 @@ impl UpdatePlan {
         for (upstream, timestamp) in &self.mirror_updates {
             let login = &upstream.login;
             log::trace!("Updating mirror {:?}", login.guid_str());
+
             stmt.execute(named_params! {
                 ":server_modified": *timestamp,
                 ":enc_unknown_fields": upstream.unknown,
@@ -241,21 +243,34 @@ impl UpdatePlan {
         let mut stmt = conn.prepare_cached(&sql)?;
         // XXX OutgoingChangeset should no longer have timestamp.
         let local_ms: i64 = util::system_time_ms_i64(SystemTime::now());
+
+
         for l in &self.local_updates {
+
+            log::debug!("origin in local  update {:?}", l.login.fields.origin);
             log::trace!("Updating local {:?}", l.guid_str());
+            let mut origin_fixed = l.login.fields.origin.to_string();
+            if let Some(fixed) = LoginFields::validate_and_fixup_origin(&origin_fixed)? {
+                // get_fixed_or_throw!(InvalidLogin::IllegalFieldValue {
+                //     field_info: "Origin is not normalized".into()
+                // })?
+                origin_fixed = fixed;
+            }
+
             stmt.execute(named_params! {
                 ":local_modified": local_ms,
                 ":http_realm": l.login.fields.http_realm,
                 ":form_action_origin": l.login.fields.form_action_origin,
                 ":username_field": l.login.fields.username_field,
                 ":password_field": l.login.fields.password_field,
-                ":origin": l.login.fields.origin,
+                ":origin": origin_fixed,
                 ":time_last_used": l.login.record.time_last_used,
                 ":time_password_changed": l.login.record.time_password_changed,
                 ":times_used": l.login.record.times_used,
                 ":guid": l.guid_str(),
                 ":sec_fields": l.login.sec_fields,
             })?;
+
             scope.err_if_interrupted()?;
         }
         Ok(())
@@ -291,14 +306,29 @@ mod tests {
     use super::*;
     use crate::db::test_utils::{
         check_local_login, check_mirror_login, get_local_guids, get_mirror_guids,
-        get_server_modified, insert_login,
+        get_server_modified, insert_login,insert_login2,check_mirror_login2,check_local_login2
     };
     use crate::db::LoginDb;
     use crate::login::test_utils::enc_login;
+    use crate::login::test_utils::enc_login2;
+
+
+
+
 
     fn inc_login(id: &str, password: &str) -> crate::sync::IncomingLogin {
         IncomingLogin {
             login: enc_login(id, password),
+            unknown: Default::default(),
+        }
+    }
+
+    fn inc_login2(id: &str, password: &str,origin: &str) -> crate::sync::IncomingLogin {
+        let mut enc_log = enc_login(id, password);
+        enc_log.fields.origin = origin.to_string();
+
+        IncomingLogin {
+            login: enc_log,
             unknown: Default::default(),
         }
     }
@@ -325,6 +355,7 @@ mod tests {
 
     #[test]
     fn test_mirror_updates() {
+
         let db = LoginDb::open_in_memory().unwrap();
         insert_login(&db, "unchanged", None, Some("password"));
         insert_login(&db, "changed", None, Some("password"));
@@ -345,11 +376,45 @@ mod tests {
         }
         .execute(&db, &db.begin_interrupt_scope().unwrap())
         .unwrap();
+
         check_mirror_login(&db, "unchanged", "password", initial_modified, false);
         check_mirror_login(&db, "changed", "new-password", 20000, false);
         check_mirror_login(&db, "changed2", "new-password2", 21000, true);
     }
+    //#[test]
+   // fn test_mirror_punycode() {
+        //
+        // let db = LoginDb::open_in_memory().unwrap();
+        // insert_login2(&db, "unchanged", None, Some("password"),"http://😍.com");
+        // //let before_update = util::system_time_ms_i64(SystemTime::now());
 
+        // insert_login2(&db, "changed", None,None, "http://😍.com");
+        // insert_login2(
+        //     &db,
+        //     "changed2",
+        //     Some("new-local-password"),
+        //     Some("password"),
+        //     "http://😍.com",
+        // );
+        // let initial_modified = get_server_modified(&db, "unchanged");
+
+        // UpdatePlan {
+        //     mirror_updates: vec![
+        //         (inc_login2("changed", "new-password","http://😍.com"), 20000),
+        //         (inc_login2("changed2", "new-password2","http://😍.com"), 21000),
+        //     ],
+        //     ..UpdatePlan::default()
+        // }
+        // .execute(&db, &db.begin_interrupt_scope().unwrap())
+        // .unwrap();
+
+
+        // check_mirror_login2(&db, "unchanged", "password", initial_modified, false,"http://😍.com");
+        // check_mirror_login2(&db, "changed2", "new-password2", 21000, true,"http://😍.com");
+
+
+
+//}
     #[test]
     fn test_mirror_inserts() {
         let db = LoginDb::open_in_memory().unwrap();
@@ -384,4 +449,28 @@ mod tests {
         .unwrap();
         check_local_login(&db, "login", "new-password", before_update);
     }
+    #[test]
+    fn test_local_updates_puncode() {
+        let db = LoginDb::open_in_memory().unwrap();
+        insert_login2(&db, "login", Some("password"), Some("password"),"http://😍.com");
+        let before_update = util::system_time_ms_i64(SystemTime::now());
+        let initial_modified = get_server_modified(&db, "login");
+
+        UpdatePlan {
+            local_updates: vec![MirrorLogin {
+                login: enc_login2("login", "new-password","http://😍.com"),
+                server_modified: ServerTimestamp(10000),
+                is_overridden: false,
+            }],
+            ..UpdatePlan::default()
+        }
+        .execute(&db, &db.begin_interrupt_scope().unwrap())
+        .unwrap();
+        // confirm the local field is fixed
+        check_local_login2(&db, "login", "new-password", before_update,"http://xn--r28h.com");
+        // confirm mirror stays mirror of server
+        check_mirror_login2(&db, "login", "password", initial_modified, true,"http://😍.com");
+
+    }
+
 }

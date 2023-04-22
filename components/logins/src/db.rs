@@ -843,6 +843,38 @@ pub mod test_utils {
         Ok(())
     }
 
+
+
+    pub fn insert_login2(
+        db: &LoginDb,
+        guid: &str,
+        local_login: Option<&str>,
+        mirror_login: Option<&str>,
+        origin: &str,
+
+    ) {
+        if let Some(password) = mirror_login {
+            let mut enc_log = enc_login(guid, password);
+            enc_log.fields.origin = origin.to_string();
+
+            add_mirror(
+                db,
+                &enc_log,
+                &ServerTimestamp(util::system_time_ms_i64(std::time::SystemTime::now())),
+                local_login.is_some(),
+            )
+            .unwrap();
+        }
+        if let Some(password) = local_login {
+            let mut enc_log = enc_login(guid, password);
+            enc_log.fields.origin = origin.to_string();
+            db.insert_new_login(&enc_log).unwrap();
+        }
+    }
+    //modification of add_miror to also
+
+
+
     pub fn get_local_guids(db: &LoginDb) -> Vec<String> {
         get_guids(db, "SELECT guid FROM loginsL")
     }
@@ -883,6 +915,22 @@ pub mod test_utils {
         assert!(row.1 >= local_modified_gte);
         assert!(!row.2);
     }
+    //modification of check_local_login to add required origin functionality
+    pub fn check_local_login2(db: &LoginDb, guid: &str, password: &str, local_modified_gte: i64,origin: &str) {
+
+        let row: (String, i64, bool,String) = db
+            .query_row(
+                "SELECT secFields, local_modified, is_deleted, origin FROM loginsL WHERE guid=?",
+                [guid],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?,row.get(3)?)),
+            )
+            .unwrap();
+        let enc: SecureLoginFields = decrypt_struct(row.0);
+        assert_eq!(enc.password, password);
+        assert!(row.1 >= local_modified_gte);
+        assert!(!row.2);
+        assert_eq!(row.3, origin);
+    }
 
     pub fn check_mirror_login(
         db: &LoginDb,
@@ -902,6 +950,31 @@ pub mod test_utils {
         assert_eq!(enc.password, password);
         assert_eq!(row.1, server_modified);
         assert_eq!(row.2, is_overridden);
+    }
+
+    pub fn check_mirror_login2(
+        db: &LoginDb,
+        guid: &str,
+        password: &str,
+        server_modified: i64,
+        is_overridden: bool,
+        origin: &str,
+
+
+    ) {
+        let row: (String, i64, bool, String) = db
+            .query_row(
+                "SELECT secFields, server_modified, is_overridden, origin FROM loginsM WHERE guid=?",
+                [guid],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?,row.get(3)?)),
+            )
+            .unwrap();
+        let enc: SecureLoginFields = decrypt_struct(row.0);
+        assert_eq!(enc.password, password);
+        assert_eq!(row.1, server_modified);
+        assert_eq!(row.2, is_overridden);
+        assert_eq!(row.3, origin);
+
     }
 }
 
