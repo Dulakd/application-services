@@ -323,15 +323,15 @@ mod tests {
         }
     }
 
-    fn inc_login2(id: &str, password: &str,origin: &str) -> crate::sync::IncomingLogin {
-        let mut enc_log = enc_login(id, password);
-        enc_log.fields.origin = origin.to_string();
+    // fn inc_login2(id: &str, password: &str,origin: &str) -> crate::sync::IncomingLogin {
+    //     let mut enc_log = enc_login(id, password);
+    //     enc_log.fields.origin = origin.to_string();
 
-        IncomingLogin {
-            login: enc_log,
-            unknown: Default::default(),
-        }
-    }
+    //     IncomingLogin {
+    //         login: enc_log,
+    //         unknown: Default::default(),
+    //     }
+    // }
 
     #[test]
     fn test_deletes() {
@@ -450,7 +450,7 @@ mod tests {
         check_local_login(&db, "login", "new-password", before_update);
     }
     #[test]
-    fn test_local_updates_puncode() {
+    fn test_local_updates_punycode() {
         let db = LoginDb::open_in_memory().unwrap();
         insert_login2(&db, "login", Some("password"), Some("password"),"http://😍.com");
         let before_update = util::system_time_ms_i64(SystemTime::now());
